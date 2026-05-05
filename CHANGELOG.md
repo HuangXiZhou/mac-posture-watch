@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- Pin `mediapipe<0.10.31` in the `vision` extra. Newer MediaPipe wheels remove the
+  legacy `mediapipe.python.solutions` Pose / Face Mesh API the runtime depends on,
+  so a fresh `pip install '.[vision]'` would otherwise install a broken combination.
 - Warn when `OPENAI_BASE_URL` uses plain `http://` with a non-local host so the API
   key is not silently sent in cleartext (setup, runtime, and `doctor`).
 - Route warnings and errors to stderr so launchd log split and shell pipelines work

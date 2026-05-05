@@ -28,7 +28,10 @@ This is a reminder tool, not a medical device or diagnostic system.
 
 ## Install
 
-MediaPipe wheels may lag behind the newest Python release. If install fails on Python 3.13, use Python 3.11 or 3.12.
+MediaPipe wheels may lag behind the newest Python release, and versions `>=0.10.31`
+remove the legacy `mediapipe.python.solutions` Pose / Face Mesh API this project
+depends on. The `vision` extra pins `mediapipe<0.10.31` for that reason. If install
+fails on Python 3.13, use Python 3.11 or 3.12.
 
 ```bash
 git clone https://github.com/HuangXiZhou/mac-posture-watch.git

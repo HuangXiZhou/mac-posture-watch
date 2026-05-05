@@ -32,7 +32,10 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = [
-  "mediapipe>=0.10.14",
+  # Pin below 0.10.31: newer MediaPipe wheels drop the legacy
+  # `mediapipe.python.solutions` Pose / Face Mesh API this project relies on.
+  # Remove the upper bound only when migrating to the MediaPipe Tasks API.
+  "mediapipe>=0.10.14,<0.10.31",
   "numpy>=1.26.0",
   "opencv-python>=4.9.0",
 ]
