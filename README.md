@@ -73,6 +73,7 @@ For troubleshooting:
 
 ```bash
 posture-watch doctor --camera
+posture-watch doctor --notify
 ```
 
 ## First Run
@@ -167,7 +168,9 @@ NOTIFY_COOLDOWN_SEC=900
 RECOVERY_SEC=120
 ```
 
-Lowering `LOCAL_SCORE_TRIGGER` or `BAD_RATIO_REQUIRED` increases recall but may add false alerts. Raising `LOCAL_ONLY_NOTIFY_SCORE` makes local-only mode more conservative.
+Lowering `LOCAL_SCORE_TRIGGER` or `BAD_RATIO_REQUIRED` increases recall but may add false
+alerts. Raising `LOCAL_ONLY_NOTIFY_SCORE` makes local-only mode more conservative. In setup, the
+sensitive profile lowers `LOCAL_ONLY_NOTIFY_SCORE` so local-only mode can notify without an LLM.
 
 ## Development
 

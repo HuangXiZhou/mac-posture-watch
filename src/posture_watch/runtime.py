@@ -7,7 +7,7 @@ from dataclasses import replace
 from .calibration import build_baseline
 from .camera import Camera
 from .config import Config
-from .detectors import MediaPipeDetector
+from .detectors import MediaPipeDetector, mediapipe_legacy_status
 from .features import MotionEstimator, assess_frame_quality, extract_features
 from .llm import create_verifier
 from .models import Baseline, Features
@@ -66,7 +66,8 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
     print(
         "Watching posture. "
         f"camera={config.camera_index}, interval={config.frame_interval_sec}s, "
-        f"llm={'on' if config.llm_ready else 'off'}."
+        f"llm={'on' if config.llm_ready else 'off'}, "
+        f"notify={_notification_summary(config)}."
     )
     last_status_at = 0.0
     motion = MotionEstimator()
@@ -103,9 +104,11 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
                         f"bad={result.is_bad_posture} reason={result.reason}"
                     )
                     if result.confirmed_bad:
-                        notifier.send(
+                        _send_notification(
+                            notifier,
                             "坐姿提醒",
-                            "检测到持续头前倾或低头，建议调整一下屏幕距离和坐姿。",
+                            "检测到持续头前倾或低头，"
+                            "建议调整一下屏幕距离和坐姿。",
                         )
                         machine.enter_cooldown(time.time())
                 elif (
@@ -113,7 +116,8 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
                     and not config.llm_ready
                     and machine.should_notify_without_llm(snapshot)
                 ):
-                    notifier.send(
+                    _send_notification(
+                        notifier,
                         "坐姿提醒",
                         "本地检测到持续头前倾或低头，建议调整一下坐姿。",
                     )
@@ -202,7 +206,7 @@ def _collect_calibration_samples(
     return samples
 
 
-def doctor(config: Config, *, camera_check: bool = False) -> int:
+def doctor(config: Config, *, camera_check: bool = False, notify_check: bool = False) -> int:
     import platform
     import sys
 
@@ -215,16 +219,19 @@ def doctor(config: Config, *, camera_check: bool = False) -> int:
         f"provider={config.llm_provider}"
     )
     print(f"Bark configured={bool(config.bark_endpoint)} mac_notify={config.mac_notify}")
-    for package in ("cv2", "mediapipe", "numpy", "requests", "dotenv"):
+    for package in ("cv2", "numpy", "requests", "dotenv"):
         try:
             __import__(package)
             print(f"{package}: ok")
         except ImportError:
             print(f"{package}: missing")
+    mediapipe_ok, mediapipe_message = mediapipe_legacy_status()
+    print(f"mediapipe: {'ok' if mediapipe_ok else 'failed'} ({mediapipe_message})")
 
     if sys.version_info >= (3, 13):
         print("note: if MediaPipe installation fails on Python 3.13, use Python 3.11 or 3.12.")
 
+    exit_code = 0
     if camera_check:
         try:
             with Camera(config.camera_index) as camera:
@@ -232,8 +239,24 @@ def doctor(config: Config, *, camera_check: bool = False) -> int:
                 print(f"camera: ok frame={frame.shape[1]}x{frame.shape[0]}")
         except RuntimeError as exc:
             print(f"camera: failed {exc}")
-            return 1
-    return 0
+            exit_code = 1
+
+    if notify_check:
+        result = Notifier(config).send(
+            "Posture Watch test",
+            "If this appears, macOS notifications are working.",
+        )
+        print(f"notification: {_notification_result_summary(config, result)}")
+        if (config.mac_notify and not result.mac_sent) or (
+            bool(config.bark_endpoint) and not result.bark_sent
+        ):
+            exit_code = 1
+        if config.mac_notify and result.mac_sent:
+            print(
+                "If no banner appeared, check System Settings > Notifications for "
+                "Terminal, your shell app, or Script Editor, and check Focus mode."
+            )
+    return exit_code
 
 
 def _verify_with_llm(
@@ -272,3 +295,29 @@ def _verify_with_llm(
         view_type=features.view_type,
         score_reasons=score.reasons,
     )
+
+
+def _notification_summary(config: Config) -> str:
+    destinations: list[str] = []
+    if config.mac_notify:
+        destinations.append("mac")
+    if config.bark_endpoint:
+        destinations.append("bark")
+    destination_text = "+".join(destinations) if destinations else "off"
+    if not config.llm_ready:
+        return f"{destination_text}, local_score>={config.local_only_notify_score:.0f}"
+    return destination_text
+
+
+def _send_notification(notifier: Notifier, title: str, body: str) -> None:
+    result = notifier.send(title, body)
+    print(f"notification: {_notification_result_summary(notifier.config, result)}")
+
+
+def _notification_result_summary(config: Config, result) -> str:
+    parts: list[str] = []
+    if config.mac_notify:
+        parts.append(f"mac={'sent' if result.mac_sent else 'failed'}")
+    if config.bark_endpoint:
+        parts.append(f"bark={'sent' if result.bark_sent else 'failed'}")
+    return " ".join(parts) if parts else "disabled"

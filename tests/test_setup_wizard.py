@@ -41,6 +41,21 @@ class SetupWizardTest(unittest.TestCase):
             self.assertIn("OLLAMA_MODEL=gemma3:4b", content)
             self.assertIn("OPENAI_API_KEY=", content)
 
+    def test_sensitive_local_profile_lowers_local_notify_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / ".env"
+            answers = iter(["", "3", "", "", "", ""])
+            run_setup_wizard(
+                output_path=output,
+                input_func=lambda prompt: next(answers),
+                secret_func=lambda prompt: "",
+                print_func=lambda message: None,
+            )
+
+            content = output.read_text(encoding="utf-8")
+            self.assertIn("FRAME_INTERVAL_SEC=2", content)
+            self.assertIn("LOCAL_ONLY_NOTIFY_SCORE=75", content)
+
 
 if __name__ == "__main__":
     unittest.main()

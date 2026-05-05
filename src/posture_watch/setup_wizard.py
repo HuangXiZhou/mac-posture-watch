@@ -26,8 +26,9 @@ def run_setup_wizard(
 ) -> Path:
     path = Path(output_path or default_config_path()).expanduser()
     print_func("Posture Watch setup")
-    print_func("Press Enter to accept the default in brackets.")
+    print_func("Press Enter to accept defaults. You can edit the generated .env later.")
 
+    _section(print_func, "Verification")
     mode = _choice(
         input_func,
         print_func,
@@ -39,6 +40,8 @@ def run_setup_wizard(
         },
         default="1",
     )
+
+    _section(print_func, "Performance")
     profile = _choice(
         input_func,
         print_func,
@@ -52,15 +55,30 @@ def run_setup_wizard(
     )
 
     values = _profile_values(profile)
+    _section(print_func, "Camera")
+    camera_index = _ask_int(input_func, print_func, "Camera index", 0, minimum=0)
+    calibration_sec = _ask_int(
+        input_func,
+        print_func,
+        "Calibration seconds",
+        45,
+        minimum=15,
+        maximum=180,
+    )
+
+    _section(print_func, "Notifications")
+    mac_notify = _yes_no(input_func, print_func, "Enable macOS notifications", True)
+    bark_endpoint = _ask(input_func, "Bark endpoint, optional", "")
+
     values.update(
         {
             "PLACEMENT_PROFILE": "default",
-            "CAMERA_INDEX": _ask(input_func, "Camera index", "0"),
-            "CALIBRATION_SEC": _ask(input_func, "Calibration seconds", "45"),
+            "CAMERA_INDEX": str(camera_index),
+            "CALIBRATION_SEC": str(calibration_sec),
             "ENABLE_LLM_VERIFY": "0" if mode == "local" else "1",
             "LLM_PROVIDER": "openai_compatible" if mode == "openai_compatible" else mode,
-            "MAC_NOTIFY": "1" if _yes_no(input_func, "Enable macOS notifications", True) else "0",
-            "BARK_ENDPOINT": _ask(input_func, "Bark endpoint, optional", ""),
+            "MAC_NOTIFY": "1" if mac_notify else "0",
+            "BARK_ENDPOINT": bark_endpoint,
             "DATA_DIR": "",
             "BASELINE_PATH": "",
             "DEBUG_SAVE_FRAMES": "0",
@@ -68,6 +86,7 @@ def run_setup_wizard(
     )
 
     if mode == "ollama":
+        _section(print_func, "Ollama")
         values.update(
             {
                 "OLLAMA_BASE_URL": _ask(input_func, "Ollama URL", "http://127.0.0.1:11434"),
@@ -80,6 +99,7 @@ def run_setup_wizard(
             }
         )
     elif mode == "openai_compatible":
+        _section(print_func, "OpenAI-compatible")
         values.update(
             {
                 "OPENAI_BASE_URL": _ask(
@@ -119,6 +139,7 @@ def run_setup_wizard(
 
     _write_env(path, values)
     print_func(f"Wrote {path}")
+    _print_summary(print_func, path, mode, profile, values)
     print_func("Next:")
     print_func(f"  posture-watch start --config {path}")
     print_func(f"  posture-watch adapt --config {path}  # after moving screen/camera")
@@ -192,7 +213,6 @@ def _profile_values(profile: str) -> dict[str, str]:
         "MIN_CALIBRATION_SAMPLES": "12",
         "LOCAL_SCORE_TRIGGER": "70",
         "LLM_VERIFY_SCORE": "75",
-        "LOCAL_ONLY_NOTIFY_SCORE": "82",
         "LLM_JSON_MODE": "1",
         "LLM_SEND_OVERLAY": "1",
         "NOTIFY_COOLDOWN_SEC": "900",
@@ -209,6 +229,7 @@ def _profile_values(profile: str) -> dict[str, str]:
                 "LLM_TIMEOUT_SEC": "30",
                 "LLM_IMAGE_MAX_SIDE": "640",
                 "LLM_JPEG_QUALITY": "65",
+                "LOCAL_ONLY_NOTIFY_SCORE": "75",
             }
         )
     elif profile == "balanced":
@@ -222,6 +243,7 @@ def _profile_values(profile: str) -> dict[str, str]:
                 "LLM_TIMEOUT_SEC": "25",
                 "LLM_IMAGE_MAX_SIDE": "512",
                 "LLM_JPEG_QUALITY": "62",
+                "LOCAL_ONLY_NOTIFY_SCORE": "78",
             }
         )
     else:
@@ -235,6 +257,7 @@ def _profile_values(profile: str) -> dict[str, str]:
                 "LLM_TIMEOUT_SEC": "20",
                 "LLM_IMAGE_MAX_SIDE": "448",
                 "LLM_JPEG_QUALITY": "58",
+                "LOCAL_ONLY_NOTIFY_SCORE": "82",
             }
         )
     return common
@@ -307,18 +330,60 @@ def _write_text_private(path: Path, text: str) -> None:
         pass
 
 
+def _section(print_func: PrintFunc, title: str) -> None:
+    print_func("")
+    print_func(f"{title}:")
+
+
 def _ask(input_func: InputFunc, prompt: str, default: str) -> str:
     suffix = f" [{default}]" if default else ""
     answer = input_func(f"{prompt}{suffix}: ").strip()
     return answer or default
 
 
-def _yes_no(input_func: InputFunc, prompt: str, default: bool) -> bool:
+def _ask_int(
+    input_func: InputFunc,
+    print_func: PrintFunc,
+    prompt: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    while True:
+        answer = input_func(f"{prompt} [{default}]: ").strip()
+        if not answer:
+            return default
+        try:
+            value = int(answer)
+        except ValueError:
+            print_func("Enter a whole number.")
+            continue
+        if minimum is not None and value < minimum:
+            print_func(f"Enter a number >= {minimum}.")
+            continue
+        if maximum is not None and value > maximum:
+            print_func(f"Enter a number <= {maximum}.")
+            continue
+        return value
+
+
+def _yes_no(
+    input_func: InputFunc,
+    print_func: PrintFunc,
+    prompt: str,
+    default: bool,
+) -> bool:
     marker = "Y/n" if default else "y/N"
-    answer = input_func(f"{prompt} [{marker}]: ").strip().lower()
-    if not answer:
-        return default
-    return answer in {"y", "yes", "1", "true"}
+    while True:
+        answer = input_func(f"{prompt} [{marker}]: ").strip().lower()
+        if not answer:
+            return default
+        if answer in {"y", "yes", "1", "true", "on"}:
+            return True
+        if answer in {"n", "no", "0", "false", "off"}:
+            return False
+        print_func("Enter y or n.")
 
 
 def _choice(
@@ -331,12 +396,38 @@ def _choice(
 ) -> str:
     print_func(prompt + ":")
     for key, (value, label) in options.items():
-        print_func(f"  {key}. {label}")
+        marker = " (default)" if key == default else ""
+        print_func(f"  {key}. {label}{marker}")
     while True:
-        answer = input_func(f"Choose [{default}]: ").strip() or default
+        answer = input_func(f"Select {prompt.lower()} [{default}]: ").strip() or default
         if answer in options:
             return options[answer][0]
         for value, _ in options.values():
-            if answer == value:
+            if answer.lower() == value.lower():
                 return value
-        print_func("Invalid choice.")
+        print_func(f"Enter one of: {', '.join(options)}.")
+
+
+def _print_summary(
+    print_func: PrintFunc,
+    path: Path,
+    mode: str,
+    profile: str,
+    values: dict[str, str],
+) -> None:
+    print_func("")
+    print_func("Summary:")
+    print_func(f"  config: {path}")
+    print_func(f"  verification: {mode}")
+    print_func(f"  performance: {profile}")
+    print_func(
+        "  camera: "
+        f"index={values['CAMERA_INDEX']} calibration={values['CALIBRATION_SEC']}s "
+        f"interval={values['FRAME_INTERVAL_SEC']}s"
+    )
+    print_func(
+        "  notifications: "
+        f"mac={'on' if values['MAC_NOTIFY'] == '1' else 'off'} "
+        f"bark={'on' if values['BARK_ENDPOINT'] else 'off'} "
+        f"local_score>={values['LOCAL_ONLY_NOTIFY_SCORE']}"
+    )

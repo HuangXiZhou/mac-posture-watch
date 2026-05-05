@@ -4,6 +4,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from posture_watch.cli import main
@@ -52,6 +53,41 @@ class CliAliasTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("camera: failed permission denied", output.getvalue())
 
+    def test_start_runtime_error_returns_message_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            env_path = Path(tempdir) / ".env"
+            env_path.write_text(
+                f"DATA_DIR={tempdir}\nPLACEMENT_PROFILE=default\n",
+                encoding="utf-8",
+            )
+            output = StringIO()
+            with patch.dict(os.environ, {}, clear=True):
+                with patch(
+                    "posture_watch.cli.adapt_placement",
+                    side_effect=RuntimeError("mediapipe unavailable"),
+                ):
+                    with redirect_stdout(output):
+                        code = main(["start", "--config", str(env_path)])
+
+        self.assertEqual(code, 1)
+        text = output.getvalue()
+        self.assertIn("error: mediapipe unavailable", text)
+        self.assertNotIn("Traceback", text)
+
+    def test_doctor_notify_sends_test_notification(self) -> None:
+        output = StringIO()
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("posture_watch.runtime.Notifier") as notifier:
+                notifier.return_value.send.return_value = SimpleNamespace(
+                    mac_sent=True,
+                    bark_sent=False,
+                )
+                with redirect_stdout(output):
+                    code = main(["doctor", "--notify"])
+
+        self.assertEqual(code, 0)
+        self.assertIn("notification: mac=sent", output.getvalue())
+
     def test_calibrate_accepts_placement_profile(self) -> None:
         with patch("posture_watch.cli.calibrate") as calibrate:
             code = main(["cal", "--placement", "External Center", "--force"])
@@ -94,7 +130,10 @@ class CliAliasTest(unittest.TestCase):
     def test_start_auto_adapts_when_baseline_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             env_path = Path(tempdir) / ".env"
-            env_path.write_text(f"DATA_DIR={tempdir}\nPLACEMENT_PROFILE=default\n", encoding="utf-8")
+            env_path.write_text(
+                f"DATA_DIR={tempdir}\nPLACEMENT_PROFILE=default\n",
+                encoding="utf-8",
+            )
             adapted = Config(
                 placement_profile="auto-front-center",
                 data_dir=Path(tempdir),

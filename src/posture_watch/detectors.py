@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from types import ModuleType
 
 from .models import Detection, Landmark
 
@@ -26,27 +27,28 @@ class MediaPipeDetector:
         min_detection_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
     ) -> None:
+        pose_module, face_mesh_module = load_mediapipe_solution_modules()
         try:
-            import mediapipe as mp
-        except ImportError as exc:
-            raise RuntimeError("Missing MediaPipe. Install with: pip install '.[vision]'") from exc
-
-        self.mp = mp
-        self.pose = mp.solutions.pose.Pose(
-            static_image_mode=False,
-            model_complexity=0,
-            smooth_landmarks=True,
-            enable_segmentation=False,
-            min_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence,
-        )
-        self.face_mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=False,
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence,
-        )
+            self.pose = pose_module.Pose(
+                static_image_mode=False,
+                model_complexity=0,
+                smooth_landmarks=True,
+                enable_segmentation=False,
+                min_detection_confidence=min_detection_confidence,
+                min_tracking_confidence=min_tracking_confidence,
+            )
+            self.face_mesh = face_mesh_module.FaceMesh(
+                static_image_mode=False,
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=min_detection_confidence,
+                min_tracking_confidence=min_tracking_confidence,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "MediaPipe legacy Pose/Face Mesh failed to initialize. "
+                "Run `posture-watch doctor` for dependency details."
+            ) from exc
 
     def detect(self, frame) -> Detection:
         import cv2
@@ -95,3 +97,35 @@ def _landmark(lm) -> Landmark:
         presence=float(getattr(lm, "presence", 1.0)),
     )
 
+
+def load_mediapipe_solution_modules() -> tuple[ModuleType, ModuleType]:
+    try:
+        import mediapipe as mp
+    except ImportError as exc:
+        raise RuntimeError("Missing MediaPipe. Install with: pip install '.[vision]'") from exc
+
+    solutions = getattr(mp, "solutions", None)
+    if solutions is not None:
+        pose = getattr(solutions, "pose", None)
+        face_mesh = getattr(solutions, "face_mesh", None)
+        if pose is not None and face_mesh is not None:
+            return pose, face_mesh
+
+    try:
+        from mediapipe.python.solutions import face_mesh, pose
+    except (ImportError, AttributeError) as exc:
+        version = getattr(mp, "__version__", "unknown")
+        raise RuntimeError(
+            "Installed MediaPipe does not expose the legacy Pose/Face Mesh API "
+            f"(mediapipe={version}). Install a legacy-compatible wheel, for example: "
+            "pipx inject --force mac-posture-watch 'mediapipe<0.10.31'"
+        ) from exc
+    return pose, face_mesh
+
+
+def mediapipe_legacy_status() -> tuple[bool, str]:
+    try:
+        load_mediapipe_solution_modules()
+    except RuntimeError as exc:
+        return False, str(exc)
+    return True, "legacy Pose/Face Mesh available"
