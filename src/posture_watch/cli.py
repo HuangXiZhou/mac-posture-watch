@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import asdict, replace
 
 from .config import Config, load_config
@@ -177,8 +178,11 @@ def main(argv: list[str] | None = None) -> int:
             return edit_config(config_path)
         parser.print_help()
         return 2
+    except KeyboardInterrupt:
+        print("\ncancelled.", file=sys.stderr)
+        return 130
     except RuntimeError as exc:
-        print(f"error: {exc}")
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
 

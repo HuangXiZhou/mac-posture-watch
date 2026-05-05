@@ -1,7 +1,7 @@
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -60,19 +60,20 @@ class CliAliasTest(unittest.TestCase):
                 f"DATA_DIR={tempdir}\nPLACEMENT_PROFILE=default\n",
                 encoding="utf-8",
             )
-            output = StringIO()
+            stdout = StringIO()
+            stderr = StringIO()
             with patch.dict(os.environ, {}, clear=True):
                 with patch(
                     "posture_watch.cli.adapt_placement",
                     side_effect=RuntimeError("mediapipe unavailable"),
                 ):
-                    with redirect_stdout(output):
+                    with redirect_stdout(stdout), redirect_stderr(stderr):
                         code = main(["start", "--config", str(env_path)])
 
         self.assertEqual(code, 1)
-        text = output.getvalue()
-        self.assertIn("error: mediapipe unavailable", text)
-        self.assertNotIn("Traceback", text)
+        combined = stdout.getvalue() + stderr.getvalue()
+        self.assertIn("error: mediapipe unavailable", combined)
+        self.assertNotIn("Traceback", combined)
 
     def test_doctor_notify_sends_test_notification(self) -> None:
         output = StringIO()

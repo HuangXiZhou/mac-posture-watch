@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import signal
+import sys
 import time
 from dataclasses import replace
+from urllib.parse import urlparse
 
 from .calibration import build_baseline
 from .camera import Camera
@@ -63,6 +65,9 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
     verifier = create_verifier(config) if config.llm_ready else None
     notifier = Notifier(config)
 
+    for warning in _security_warnings(config):
+        _warn(warning)
+
     print(
         "Watching posture. "
         f"camera={config.camera_index}, interval={config.frame_interval_sec}s, "
@@ -71,6 +76,8 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
     )
     last_status_at = 0.0
     motion = MotionEstimator()
+    consecutive_errors = 0
+    last_error_message = ""
 
     with Camera(config.camera_index) as camera, MediaPipeDetector() as detector:
         while not stop_flag.stop:
@@ -92,12 +99,12 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
                         f"quality={quality.reason}"
                     )
 
-                if quality.ok and config.llm_ready and machine.should_verify_with_llm(
-                    snapshot, time.time(), limiter
+                if (
+                    quality.ok
+                    and verifier is not None
+                    and machine.should_verify_with_llm(snapshot, time.time(), limiter)
                 ):
                     limiter.record(time.time())
-                    if verifier is None:
-                        continue
                     result = _verify_with_llm(config, verifier, frame, detection, score, features)
                     print(
                         f"llm severity={result.severity} confidence={result.confidence:.2f} "
@@ -122,11 +129,27 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
                         "本地检测到持续头前倾或低头，建议调整一下坐姿。",
                     )
                     machine.enter_cooldown(time.time())
+                consecutive_errors = 0
+                last_error_message = ""
+            except KeyboardInterrupt:
+                stop_flag.stop = True
+                break
             except Exception as exc:
-                print(f"warning: {exc}")
+                message = f"{type(exc).__name__}: {exc}"
+                consecutive_errors += 1
+                if message != last_error_message or consecutive_errors <= 3:
+                    _warn(f"frame error: {message}")
+                    last_error_message = message
 
             elapsed = time.time() - started
-            time.sleep(max(0.1, config.frame_interval_sec - elapsed))
+            base_sleep = max(0.1, config.frame_interval_sec - elapsed)
+            if consecutive_errors > 0:
+                # Exponential back-off capped at 30s to avoid CPU spin and log spam
+                # if the camera/detector keeps failing (e.g. permission revoked).
+                backoff = min(30.0, base_sleep * (2 ** min(consecutive_errors, 5)))
+                time.sleep(backoff)
+            else:
+                time.sleep(base_sleep)
 
     print("Stopped.")
     return 0
@@ -228,6 +251,9 @@ def doctor(config: Config, *, camera_check: bool = False, notify_check: bool = F
     mediapipe_ok, mediapipe_message = mediapipe_legacy_status()
     print(f"mediapipe: {'ok' if mediapipe_ok else 'failed'} ({mediapipe_message})")
 
+    for warning in _security_warnings(config):
+        _warn(warning)
+
     if sys.version_info >= (3, 13):
         print("note: if MediaPipe installation fails on Python 3.13, use Python 3.11 or 3.12.")
 
@@ -321,3 +347,26 @@ def _notification_result_summary(config: Config, result) -> str:
     if config.bark_endpoint:
         parts.append(f"bark={'sent' if result.bark_sent else 'failed'}")
     return " ".join(parts) if parts else "disabled"
+
+
+def _security_warnings(config: Config) -> list[str]:
+    warnings: list[str] = []
+    provider = config.llm_provider.lower()
+    if (
+        config.llm_ready
+        and provider not in {"ollama", "local", "gemma"}
+        and config.openai_api_key
+    ):
+        scheme = urlparse(config.openai_base_url).scheme.lower()
+        host = (urlparse(config.openai_base_url).hostname or "").lower()
+        is_local_host = host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local")
+        if scheme == "http" and not is_local_host:
+            warnings.append(
+                "OPENAI_BASE_URL uses plain http://; the API key would be sent in cleartext. "
+                "Use https:// or a local endpoint."
+            )
+    return warnings
+
+
+def _warn(message: str) -> None:
+    print(f"warning: {message}", file=sys.stderr)

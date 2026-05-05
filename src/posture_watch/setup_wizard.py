@@ -100,15 +100,23 @@ def run_setup_wizard(
         )
     elif mode == "openai_compatible":
         _section(print_func, "OpenAI-compatible")
+        base_url = _ask(
+            input_func,
+            "OpenAI-compatible base URL",
+            "https://api.openai.com/v1",
+        )
+        api_key = secret_func("API key (input hidden, optional now): ").strip()
+        if api_key and base_url.lower().startswith("http://"):
+            host = base_url.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
+            if host not in {"localhost", "127.0.0.1", "::1"} and not host.endswith(".local"):
+                print_func(
+                    "warning: base URL uses plain http://; the API key will be sent in cleartext."
+                )
         values.update(
             {
-                "OPENAI_BASE_URL": _ask(
-                    input_func,
-                    "OpenAI-compatible base URL",
-                    "https://api.openai.com/v1",
-                ),
+                "OPENAI_BASE_URL": base_url,
                 "OPENAI_MODEL": _ask(input_func, "Vision model name", ""),
-                "OPENAI_API_KEY": secret_func("API key (input hidden, optional now): ").strip(),
+                "OPENAI_API_KEY": api_key,
                 "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
                 "OLLAMA_MODEL": "gemma3:4b",
                 "OLLAMA_KEEP_ALIVE": "30s",

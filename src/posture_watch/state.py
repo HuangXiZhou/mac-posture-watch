@@ -90,8 +90,6 @@ class PostureStateMachine:
                     self.normal_since = None
             else:
                 self.normal_since = None
-            if now < self.cooldown_until:
-                return self._snapshot(now)
             return self._snapshot(now)
 
         if self._window_is_bad(snapshot):
