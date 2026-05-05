@@ -33,7 +33,36 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[vision]"
-cp .env.example .env
+```
+
+## Setup
+
+Most users should use the interactive setup instead of editing `.env` by hand:
+
+```bash
+posture-watch setup
+```
+
+It asks for:
+
+- local-only, local Gemma/Ollama, or cloud OpenAI-compatible verification;
+- cool/balanced/sensitive performance profile;
+- camera index and calibration time;
+- macOS notification and optional Bark endpoint.
+
+Then run:
+
+```bash
+posture-watch check --camera-check
+posture-watch cal --force
+posture-watch start
+```
+
+To inspect or edit later:
+
+```bash
+posture-watch config
+posture-watch edit-config
 ```
 
 ## First Run
@@ -41,9 +70,9 @@ cp .env.example .env
 Grant camera permission when macOS asks. Keep your normal sitting posture during calibration.
 
 ```bash
-posture-watch doctor --camera-check
-posture-watch calibrate --force
-posture-watch run
+posture-watch check --camera-check
+posture-watch cal --force
+posture-watch start
 ```
 
 If you prefer source execution without installing the console script:
@@ -68,6 +97,30 @@ MAX_LLM_CALLS_PER_HOUR=6
 
 For local or third-party OpenAI-compatible providers, set `OPENAI_BASE_URL` and `OPENAI_MODEL` accordingly. `LLM_API_MODE=chat` is the most compatible option; `responses` is also supported for OpenAI Responses-style image input.
 
+### Local Gemma Through Ollama
+
+For fully local verification, install Ollama and pull a vision-capable Gemma model:
+
+```bash
+ollama pull gemma3:4b
+```
+
+Then configure:
+
+```dotenv
+ENABLE_LLM_VERIFY=1
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=gemma3:4b
+OLLAMA_KEEP_ALIVE=30s
+LLM_MIN_INTERVAL_SEC=900
+MAX_LLM_CALLS_PER_HOUR=2
+LLM_IMAGE_MAX_SIDE=512
+LLM_JPEG_QUALITY=62
+```
+
+For weaker Macs, keep `ENABLE_LLM_VERIFY=0` first. The local MediaPipe scoring path is much lighter than any local vision LLM.
+
 ## Notifications
 
 macOS notifications are enabled by default:
@@ -87,13 +140,13 @@ BARK_ENDPOINT=https://api.day.app/your_key
 Install a user LaunchAgent after you have verified interactive camera access:
 
 ```bash
-posture-watch install-launch-agent --start --config "$(pwd)/.env"
+posture-watch autostart-on --start --config "$(pwd)/.env"
 ```
 
 Remove it:
 
 ```bash
-posture-watch uninstall-launch-agent --stop
+posture-watch autostart-off --stop
 ```
 
 Logs are written to `~/Library/Logs/posture-watch/`.
@@ -127,5 +180,5 @@ Run runtime checks with vision dependencies:
 
 ```bash
 python -m pip install -e ".[vision]"
-posture-watch doctor --camera-check
+posture-watch check --camera-check
 ```

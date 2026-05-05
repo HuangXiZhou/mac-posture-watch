@@ -10,7 +10,7 @@ from .camera import Camera
 from .config import Config
 from .detectors import MediaPipeDetector
 from .features import MotionEstimator, assess_frame_quality, extract_features
-from .llm import OpenAICompatibleVerifier
+from .llm import create_verifier
 from .models import Baseline, Features
 from .notify import Notifier
 from .overlay import draw_overlay, encode_jpeg
@@ -52,7 +52,7 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
         local_only_notify_score=config.local_only_notify_score,
     )
     limiter = LlmRateLimiter(config.llm_min_interval_sec, config.max_llm_calls_per_hour)
-    verifier = OpenAICompatibleVerifier(config)
+    verifier = create_verifier(config) if config.llm_ready else None
     notifier = Notifier(config)
 
     print(
@@ -87,7 +87,9 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
                     snapshot, time.time(), limiter
                 ):
                     limiter.record(time.time())
-                    result = _verify_with_llm(verifier, frame, detection, score, features)
+                    if verifier is None:
+                        continue
+                    result = _verify_with_llm(config, verifier, frame, detection, score, features)
                     print(
                         f"llm severity={result.severity} confidence={result.confidence:.2f} "
                         f"bad={result.is_bad_posture} reason={result.reason}"
@@ -158,7 +160,10 @@ def doctor(config: Config, *, camera_check: bool = False) -> int:
     print(f"Python: {sys.version.split()[0]} ({platform.platform()})")
     print(f"Data dir: {config.data_dir}")
     print(f"Baseline: {config.baseline_path} exists={config.baseline_path.exists()}")
-    print(f"LLM enabled={config.enable_llm_verify} ready={config.llm_ready}")
+    print(
+        f"LLM enabled={config.enable_llm_verify} ready={config.llm_ready} "
+        f"provider={config.llm_provider}"
+    )
     print(f"Bark configured={bool(config.bark_endpoint)} mac_notify={config.mac_notify}")
     for package in ("cv2", "mediapipe", "numpy", "requests", "dotenv"):
         try:
@@ -178,24 +183,38 @@ def doctor(config: Config, *, camera_check: bool = False) -> int:
 
 
 def _verify_with_llm(
-    verifier: OpenAICompatibleVerifier,
+    config: Config,
+    verifier,
     frame,
     detection,
     score,
     features,
 ):
-    overlay = draw_overlay(
-        frame,
-        detection,
-        score=score.total,
-        view_type=features.view_type,
-        reasons=score.reasons,
-    )
+    overlay = None
+    if config.llm_send_overlay:
+        overlay = draw_overlay(
+            frame,
+            detection,
+            score=score.total,
+            view_type=features.view_type,
+            reasons=score.reasons,
+        )
     return verifier.verify(
-        frame_jpeg=encode_jpeg(frame),
-        overlay_jpeg=encode_jpeg(overlay),
+        frame_jpeg=encode_jpeg(
+            frame,
+            max_side=config.llm_image_max_side,
+            quality=config.llm_jpeg_quality,
+        ),
+        overlay_jpeg=(
+            encode_jpeg(
+                overlay,
+                max_side=config.llm_image_max_side,
+                quality=config.llm_jpeg_quality,
+            )
+            if overlay is not None
+            else None
+        ),
         local_score=score.total,
         view_type=features.view_type,
         score_reasons=score.reasons,
     )
-

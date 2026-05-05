@@ -54,10 +54,16 @@ class Config:
     openai_base_url: str = "https://api.openai.com/v1"
     openai_api_key: str = ""
     openai_model: str = ""
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "gemma3:4b"
+    ollama_keep_alive: str = "30s"
     llm_min_interval_sec: int = 600
     max_llm_calls_per_hour: int = 6
     llm_timeout_sec: int = 30
     llm_json_mode: bool = True
+    llm_image_max_side: int = 512
+    llm_jpeg_quality: int = 62
+    llm_send_overlay: bool = True
 
     bark_endpoint: str = ""
     mac_notify: bool = True
@@ -70,7 +76,12 @@ class Config:
 
     @property
     def llm_ready(self) -> bool:
-        return bool(self.enable_llm_verify and self.openai_api_key and self.openai_model)
+        if not self.enable_llm_verify:
+            return False
+        provider = self.llm_provider.lower()
+        if provider in {"ollama", "local", "gemma"}:
+            return bool(self.ollama_base_url and self.ollama_model)
+        return bool(self.openai_api_key and self.openai_model)
 
 
 def load_config(config_path: str | Path | None = None) -> Config:
@@ -100,10 +111,16 @@ def load_config(config_path: str | Path | None = None) -> Config:
         openai_base_url=(os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/"),
         openai_api_key=os.getenv("OPENAI_API_KEY") or "",
         openai_model=os.getenv("OPENAI_MODEL") or "",
+        ollama_base_url=(os.getenv("OLLAMA_BASE_URL") or "http://127.0.0.1:11434").rstrip("/"),
+        ollama_model=os.getenv("OLLAMA_MODEL") or "gemma3:4b",
+        ollama_keep_alive=os.getenv("OLLAMA_KEEP_ALIVE") or "30s",
         llm_min_interval_sec=_int(os.getenv("LLM_MIN_INTERVAL_SEC"), 600),
         max_llm_calls_per_hour=_int(os.getenv("MAX_LLM_CALLS_PER_HOUR"), 6),
         llm_timeout_sec=_int(os.getenv("LLM_TIMEOUT_SEC"), 30),
         llm_json_mode=_bool(os.getenv("LLM_JSON_MODE"), True),
+        llm_image_max_side=_int(os.getenv("LLM_IMAGE_MAX_SIDE"), 512),
+        llm_jpeg_quality=_int(os.getenv("LLM_JPEG_QUALITY"), 62),
+        llm_send_overlay=_bool(os.getenv("LLM_SEND_OVERLAY"), True),
         bark_endpoint=os.getenv("BARK_ENDPOINT") or "",
         mac_notify=_bool(os.getenv("MAC_NOTIFY"), True),
         notify_cooldown_sec=_int(os.getenv("NOTIFY_COOLDOWN_SEC"), 900),

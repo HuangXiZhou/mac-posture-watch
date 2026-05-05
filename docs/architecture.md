@@ -61,3 +61,9 @@ When enabled and configured, the LLM verifier sends:
 
 The verifier is rate-limited by minimum interval and hourly call count. If the provider returns invalid JSON, low confidence, `mild`, or `unknown`, notification is suppressed.
 
+Supported providers:
+
+- `openai_compatible`: OpenAI-style Chat Completions or Responses image input.
+- `ollama`: local Ollama `/api/chat` with raw base64 image input, suitable for local Gemma vision models.
+
+Ollama and OpenAI-compatible providers intentionally use different image payload formats. OpenAI-compatible requests use `data:image/jpeg;base64,...`; Ollama requests use raw base64 strings in the message `images` field.

@@ -1,6 +1,7 @@
 import unittest
 
-from posture_watch.llm import parse_verification_text
+from posture_watch.config import Config
+from posture_watch.llm import OllamaVerifier, create_verifier, parse_verification_text
 
 
 class ParseVerificationTextTest(unittest.TestCase):
@@ -26,6 +27,28 @@ class ParseVerificationTextTest(unittest.TestCase):
         self.assertEqual(result.severity, "unknown")
 
 
+class OllamaVerifierTest(unittest.TestCase):
+    def test_ollama_payload_uses_raw_base64_images(self) -> None:
+        config = Config(enable_llm_verify=True, llm_provider="ollama", ollama_model="gemma3:4b")
+        verifier = OllamaVerifier(config)
+        payload = verifier._payload("prompt", b"image-bytes", b"overlay-bytes")
+
+        self.assertEqual(payload["model"], "gemma3:4b")
+        self.assertEqual(payload["stream"], False)
+        self.assertEqual(payload["format"], "json")
+        images = payload["messages"][0]["images"]
+        self.assertEqual(len(images), 2)
+        self.assertFalse(images[0].startswith("data:image"))
+
+    def test_create_verifier_selects_ollama_aliases(self) -> None:
+        for provider in ("ollama", "local", "gemma"):
+            verifier = create_verifier(Config(enable_llm_verify=True, llm_provider=provider))
+            self.assertIsInstance(verifier, OllamaVerifier)
+
+    def test_create_verifier_rejects_unknown_provider(self) -> None:
+        with self.assertRaises(ValueError):
+            create_verifier(Config(enable_llm_verify=True, llm_provider="unknown"))
+
+
 if __name__ == "__main__":
     unittest.main()
-

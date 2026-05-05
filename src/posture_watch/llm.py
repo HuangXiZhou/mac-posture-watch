@@ -150,9 +150,88 @@ class OpenAICompatibleVerifier:
         return data["choices"][0]["message"]["content"]
 
 
+class OllamaVerifier:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    def verify(
+        self,
+        *,
+        frame_jpeg: bytes,
+        overlay_jpeg: bytes | None,
+        local_score: float,
+        view_type: str,
+        score_reasons: tuple[str, ...],
+    ) -> VerificationResult:
+        if not self.config.llm_ready:
+            return VerificationResult(False, "unknown", 0.0, reason="llm_not_configured")
+        payload = self._payload(
+            prompt=(
+                f"{VERIFY_PROMPT}\n"
+                f"本地检测信息：score={local_score:.1f}, view_type={view_type}, "
+                f"reasons={','.join(score_reasons) or 'none'}。"
+            ),
+            frame_jpeg=frame_jpeg,
+            overlay_jpeg=overlay_jpeg,
+        )
+        text = self._post_and_extract_text(payload)
+        return parse_verification_text(text)
+
+    def _payload(
+        self, prompt: str, frame_jpeg: bytes, overlay_jpeg: bytes | None
+    ) -> dict[str, Any]:
+        images = [_raw_base64(frame_jpeg)]
+        if overlay_jpeg:
+            images.append(_raw_base64(overlay_jpeg))
+        payload: dict[str, Any] = {
+            "model": self.config.ollama_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"只输出一个 JSON 对象，不要输出 Markdown。\n{prompt}",
+                    "images": images,
+                }
+            ],
+            "stream": False,
+            "keep_alive": self.config.ollama_keep_alive,
+            "options": {
+                "temperature": 0,
+                "num_predict": 256,
+            },
+        }
+        if self.config.llm_json_mode:
+            payload["format"] = "json"
+        return payload
+
+    def _post_and_extract_text(self, payload: dict[str, Any]) -> str:
+        import requests
+
+        response = requests.post(
+            f"{self.config.ollama_base_url}/api/chat",
+            json=payload,
+            timeout=self.config.llm_timeout_sec,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("message", {}).get("content", "")
+
+
+def create_verifier(config: Config) -> OpenAICompatibleVerifier | OllamaVerifier:
+    provider = config.llm_provider.lower()
+    if provider in {"ollama", "local", "gemma"}:
+        return OllamaVerifier(config)
+    if provider in {"openai", "openai_compatible", "compatible"}:
+        return OpenAICompatibleVerifier(config)
+    raise ValueError(f"Unsupported LLM_PROVIDER: {config.llm_provider}")
+
+
 def _data_url(jpeg_bytes: bytes) -> str:
     encoded = base64.b64encode(jpeg_bytes).decode("ascii")
     return f"data:image/jpeg;base64,{encoded}"
+
+
+def _raw_base64(jpeg_bytes: bytes) -> str:
+    return base64.b64encode(jpeg_bytes).decode("ascii")
 
 
 def _extract_responses_text(data: dict[str, Any]) -> str:
