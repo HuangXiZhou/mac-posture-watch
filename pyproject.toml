@@ -32,10 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = [
-  # Pin below 0.10.31: newer MediaPipe wheels drop the legacy
-  # `mediapipe.python.solutions` Pose / Face Mesh API this project relies on.
-  # Remove the upper bound only when migrating to the MediaPipe Tasks API.
-  "mediapipe>=0.10.14,<0.10.31",
+  "mediapipe>=0.10.21",
   "numpy>=1.26.0",
   "opencv-python>=4.9.0",
 ]
@@ -53,6 +50,9 @@ posture-watch = "posture_watch.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"posture_watch.assets" = ["*.task"]
 
 [tool.ruff]
 line-length = 100

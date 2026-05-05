@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from types import ModuleType
+from importlib.resources import files
+from pathlib import Path
 
 from .models import Detection, Landmark
 
@@ -17,9 +18,28 @@ POSE_LANDMARKS = {
     24: "right_hip",
 }
 
+POSE_MODEL_FILE = "pose_landmarker_lite.task"
+FACE_MODEL_FILE = "face_landmarker.task"
+
+
+def _asset_path(name: str) -> str:
+    return str(files("posture_watch.assets").joinpath(name))
+
+
+def assets_status() -> tuple[bool, str]:
+    """Report whether bundled MediaPipe Tasks model files are present."""
+    missing = [
+        name
+        for name in (POSE_MODEL_FILE, FACE_MODEL_FILE)
+        if not Path(_asset_path(name)).is_file()
+    ]
+    if missing:
+        return False, f"missing model assets: {', '.join(missing)}"
+    return True, "model assets present"
+
 
 class MediaPipeDetector:
-    """CPU-only local detector using MediaPipe Pose and Face Mesh solutions."""
+    """Local CPU detector using MediaPipe Tasks PoseLandmarker + FaceLandmarker (VIDEO mode)."""
 
     def __init__(
         self,
@@ -27,47 +47,59 @@ class MediaPipeDetector:
         min_detection_confidence: float = 0.5,
         min_tracking_confidence: float = 0.5,
     ) -> None:
-        pose_module, face_mesh_module = load_mediapipe_solution_modules()
-        try:
-            self.pose = pose_module.Pose(
-                static_image_mode=False,
-                model_complexity=0,
-                smooth_landmarks=True,
-                enable_segmentation=False,
-                min_detection_confidence=min_detection_confidence,
+        from mediapipe.tasks.python import BaseOptions
+        from mediapipe.tasks.python.vision import (
+            FaceLandmarker,
+            FaceLandmarkerOptions,
+            PoseLandmarker,
+            PoseLandmarkerOptions,
+            RunningMode,
+        )
+
+        self.pose = PoseLandmarker.create_from_options(
+            PoseLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=_asset_path(POSE_MODEL_FILE)),
+                running_mode=RunningMode.VIDEO,
+                num_poses=1,
+                min_pose_detection_confidence=min_detection_confidence,
+                min_pose_presence_confidence=min_detection_confidence,
                 min_tracking_confidence=min_tracking_confidence,
             )
-            self.face_mesh = face_mesh_module.FaceMesh(
-                static_image_mode=False,
-                max_num_faces=1,
-                refine_landmarks=True,
-                min_detection_confidence=min_detection_confidence,
+        )
+        self.face = FaceLandmarker.create_from_options(
+            FaceLandmarkerOptions(
+                base_options=BaseOptions(model_asset_path=_asset_path(FACE_MODEL_FILE)),
+                running_mode=RunningMode.VIDEO,
+                num_faces=1,
+                min_face_detection_confidence=min_detection_confidence,
+                min_face_presence_confidence=min_detection_confidence,
                 min_tracking_confidence=min_tracking_confidence,
             )
-        except Exception as exc:
-            raise RuntimeError(
-                "MediaPipe legacy Pose/Face Mesh failed to initialize. "
-                "Run `posture-watch doctor` for dependency details."
-            ) from exc
+        )
+        self._t0 = time.monotonic()
 
     def detect(self, frame) -> Detection:
         import cv2
+        import mediapipe as mp
 
         height, width = frame.shape[:2]
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        rgb.flags.writeable = False
-        pose_result = self.pose.process(rgb)
-        face_result = self.face_mesh.process(rgb)
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        # VIDEO mode requires strictly increasing millisecond timestamps.
+        ts_ms = int((time.monotonic() - self._t0) * 1000)
+
+        pose_result = self.pose.detect_for_video(image, ts_ms)
+        face_result = self.face.detect_for_video(image, ts_ms)
 
         pose: dict[str, Landmark] = {}
         if pose_result.pose_landmarks:
+            landmarks = pose_result.pose_landmarks[0]
             for index, name in POSE_LANDMARKS.items():
-                lm = pose_result.pose_landmarks.landmark[index]
-                pose[name] = _landmark(lm)
+                pose[name] = _landmark(landmarks[index])
 
         face: list[Landmark] = []
-        if face_result.multi_face_landmarks:
-            face = [_landmark(lm) for lm in face_result.multi_face_landmarks[0].landmark]
+        if face_result.face_landmarks:
+            face = [_landmark(lm) for lm in face_result.face_landmarks[0]]
 
         return Detection(
             timestamp=time.time(),
@@ -79,7 +111,7 @@ class MediaPipeDetector:
 
     def close(self) -> None:
         self.pose.close()
-        self.face_mesh.close()
+        self.face.close()
 
     def __enter__(self) -> "MediaPipeDetector":
         return self
@@ -96,36 +128,3 @@ def _landmark(lm) -> Landmark:
         visibility=float(getattr(lm, "visibility", 1.0)),
         presence=float(getattr(lm, "presence", 1.0)),
     )
-
-
-def load_mediapipe_solution_modules() -> tuple[ModuleType, ModuleType]:
-    try:
-        import mediapipe as mp
-    except ImportError as exc:
-        raise RuntimeError("Missing MediaPipe. Install with: pip install '.[vision]'") from exc
-
-    solutions = getattr(mp, "solutions", None)
-    if solutions is not None:
-        pose = getattr(solutions, "pose", None)
-        face_mesh = getattr(solutions, "face_mesh", None)
-        if pose is not None and face_mesh is not None:
-            return pose, face_mesh
-
-    try:
-        from mediapipe.python.solutions import face_mesh, pose
-    except (ImportError, AttributeError) as exc:
-        version = getattr(mp, "__version__", "unknown")
-        raise RuntimeError(
-            "Installed MediaPipe does not expose the legacy Pose/Face Mesh API "
-            f"(mediapipe={version}). Install a legacy-compatible wheel, for example: "
-            "pipx inject --force mac-posture-watch 'mediapipe<0.10.31'"
-        ) from exc
-    return pose, face_mesh
-
-
-def mediapipe_legacy_status() -> tuple[bool, str]:
-    try:
-        load_mediapipe_solution_modules()
-    except RuntimeError as exc:
-        return False, str(exc)
-    return True, "legacy Pose/Face Mesh available"

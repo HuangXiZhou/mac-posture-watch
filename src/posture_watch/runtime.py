@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from .calibration import build_baseline
 from .camera import Camera
 from .config import Config
-from .detectors import MediaPipeDetector, mediapipe_legacy_status
+from .detectors import MediaPipeDetector, assets_status
 from .features import MotionEstimator, assess_frame_quality, extract_features
 from .llm import create_verifier
 from .models import Baseline, Features
@@ -242,14 +242,14 @@ def doctor(config: Config, *, camera_check: bool = False, notify_check: bool = F
         f"provider={config.llm_provider}"
     )
     print(f"Bark configured={bool(config.bark_endpoint)} mac_notify={config.mac_notify}")
-    for package in ("cv2", "numpy", "requests", "dotenv"):
+    for package in ("cv2", "numpy", "requests", "dotenv", "mediapipe"):
         try:
             __import__(package)
             print(f"{package}: ok")
         except ImportError:
             print(f"{package}: missing")
-    mediapipe_ok, mediapipe_message = mediapipe_legacy_status()
-    print(f"mediapipe: {'ok' if mediapipe_ok else 'failed'} ({mediapipe_message})")
+    assets_ok, assets_message = assets_status()
+    print(f"model assets: {'ok' if assets_ok else 'failed'} ({assets_message})")
 
     for warning in _security_warnings(config):
         _warn(warning)
