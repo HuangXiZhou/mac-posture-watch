@@ -3,7 +3,6 @@ from __future__ import annotations
 import signal
 import time
 from dataclasses import replace
-from pathlib import Path
 
 from .calibration import build_baseline
 from .camera import Camera
@@ -14,6 +13,12 @@ from .llm import create_verifier
 from .models import Baseline, Features
 from .notify import Notifier
 from .overlay import draw_overlay, encode_jpeg
+from .placement import (
+    calibration_guidance,
+    format_detected_placement,
+    infer_placement_profile,
+    with_placement,
+)
 from .scoring import score_posture
 from .state import LlmRateLimiter, PostureStateMachine
 from .storage import load_baseline, save_baseline
@@ -36,11 +41,14 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
     stop_flag.install()
 
     if recalibrate or not config.baseline_path.exists():
-        print("No baseline found. Starting calibration; sit normally and face your screen.")
+        print("No baseline found. Starting calibration.")
         baseline = calibrate(config, overwrite=True, stop_flag=stop_flag)
     else:
         baseline = load_baseline(config.baseline_path)
-        print(f"Loaded baseline from {config.baseline_path} ({baseline.samples} samples).")
+        print(
+            f"Loaded baseline placement={config.placement_profile} "
+            f"path={config.baseline_path} samples={baseline.samples}."
+        )
 
     machine = PostureStateMachine(
         local_window_sec=config.local_window_sec,
@@ -95,10 +103,20 @@ def run_watcher(config: Config, *, recalibrate: bool = False) -> int:
                         f"bad={result.is_bad_posture} reason={result.reason}"
                     )
                     if result.confirmed_bad:
-                        notifier.send("坐姿提醒", "检测到持续头前倾或低头，建议调整一下屏幕距离和坐姿。")
+                        notifier.send(
+                            "坐姿提醒",
+                            "检测到持续头前倾或低头，建议调整一下屏幕距离和坐姿。",
+                        )
                         machine.enter_cooldown(time.time())
-                elif quality.ok and not config.llm_ready and machine.should_notify_without_llm(snapshot):
-                    notifier.send("坐姿提醒", "本地检测到持续头前倾或低头，建议调整一下坐姿。")
+                elif (
+                    quality.ok
+                    and not config.llm_ready
+                    and machine.should_notify_without_llm(snapshot)
+                ):
+                    notifier.send(
+                        "坐姿提醒",
+                        "本地检测到持续头前倾或低头，建议调整一下坐姿。",
+                    )
                     machine.enter_cooldown(time.time())
             except Exception as exc:
                 print(f"warning: {exc}")
@@ -119,11 +137,43 @@ def calibrate(
     if config.baseline_path.exists() and not overwrite:
         raise RuntimeError(f"Baseline already exists: {config.baseline_path}")
 
+    samples = _collect_calibration_samples(config, stop_flag=stop_flag)
+    baseline = build_baseline(samples)
+    save_baseline(config.baseline_path, baseline)
+    print(f"Saved baseline to {config.baseline_path} ({baseline.samples} samples).")
+    return baseline
+
+
+def adapt_placement(
+    config: Config,
+    *,
+    infer_profile: bool = True,
+    stop_flag: StopFlag | None = None,
+) -> tuple[Config, Baseline]:
+    samples = _collect_calibration_samples(config, stop_flag=stop_flag)
+    baseline = build_baseline(samples)
+    adapted_config = (
+        with_placement(config, infer_placement_profile(baseline)) if infer_profile else config
+    )
+    save_baseline(adapted_config.baseline_path, baseline)
+    print(format_detected_placement(baseline, adapted_config.placement_profile))
+    print(f"Saved baseline to {adapted_config.baseline_path} ({baseline.samples} samples).")
+    return adapted_config, baseline
+
+
+def _collect_calibration_samples(
+    config: Config,
+    *,
+    stop_flag: StopFlag | None = None,
+) -> list[Features]:
     local_stop = stop_flag or StopFlag()
     samples: list[Features] = []
     motion = MotionEstimator()
     deadline = time.time() + config.calibration_sec
     next_print = 0.0
+    print("Calibration guide:")
+    for line in calibration_guidance(config):
+        print(f"  - {line}")
 
     with Camera(config.camera_index) as camera, MediaPipeDetector() as detector:
         while time.time() < deadline and not local_stop.stop:
@@ -137,7 +187,10 @@ def calibrate(
             now = time.time()
             if now >= next_print:
                 remaining = max(0, int(deadline - now))
-                print(f"calibrating... samples={len(samples)} remaining={remaining}s quality={quality.reason}")
+                print(
+                    f"calibrating... samples={len(samples)} "
+                    f"remaining={remaining}s quality={quality.reason}"
+                )
                 next_print = now + 5
             time.sleep(max(0.1, config.frame_interval_sec))
 
@@ -146,11 +199,7 @@ def calibrate(
             f"Only collected {len(samples)} usable samples; need at least "
             f"{config.min_calibration_samples}. Improve lighting/camera angle and retry."
         )
-
-    baseline = build_baseline(samples)
-    save_baseline(config.baseline_path, baseline)
-    print(f"Saved baseline to {config.baseline_path} ({baseline.samples} samples).")
-    return baseline
+    return samples
 
 
 def doctor(config: Config, *, camera_check: bool = False) -> int:
@@ -159,6 +208,7 @@ def doctor(config: Config, *, camera_check: bool = False) -> int:
 
     print(f"Python: {sys.version.split()[0]} ({platform.platform()})")
     print(f"Data dir: {config.data_dir}")
+    print(f"Placement: {config.placement_profile}")
     print(f"Baseline: {config.baseline_path} exists={config.baseline_path.exists()}")
     print(
         f"LLM enabled={config.enable_llm_verify} ready={config.llm_ready} "
@@ -176,9 +226,13 @@ def doctor(config: Config, *, camera_check: bool = False) -> int:
         print("note: if MediaPipe installation fails on Python 3.13, use Python 3.11 or 3.12.")
 
     if camera_check:
-        with Camera(config.camera_index) as camera:
-            frame = camera.read()
-            print(f"camera: ok frame={frame.shape[1]}x{frame.shape[0]}")
+        try:
+            with Camera(config.camera_index) as camera:
+                frame = camera.read()
+                print(f"camera: ok frame={frame.shape[1]}x{frame.shape[0]}")
+        except RuntimeError as exc:
+            print(f"camera: failed {exc}")
+            return 1
     return 0
 
 

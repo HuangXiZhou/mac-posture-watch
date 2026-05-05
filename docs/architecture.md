@@ -24,11 +24,18 @@ The runtime does not ask an LLM to classify every frame. It first checks:
 - shoulder and neck relation: shoulder width, shoulder slope, nose-to-shoulder, ear-to-shoulder;
 - stillness: downscaled frame-difference signal to avoid alerting on movement.
 
-The score is continuous from `0` to `100`. Bad or low-quality frames do not count toward the abnormal window.
+The score is continuous from `0` to `100`. The total score combines weighted evidence
+with a severe-evidence path, so sustained severe low-head, too-close, forward-head, or
+rounded-shoulder signals can cross the local window threshold even when only one symptom
+is dominant. Bad or low-quality frames do not count toward the abnormal window.
 
 ## Baseline
 
 Calibration stores median feature values from normal sitting posture. Runtime scoring compares current values with this personal baseline instead of fixed global thresholds. This makes different Mac camera positions more tolerable.
+
+`posture-watch adapt` wraps calibration with placement inference. It samples the current camera
+view, assigns an `auto-*` placement profile from the observed view type and face position, writes
+the baseline under that profile, and updates local config so later runs use the same layout.
 
 Baseline data is local JSON and may reveal approximate face/shoulder geometry, so it is stored outside the repository by default.
 

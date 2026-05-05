@@ -25,6 +25,8 @@ def install_launch_agent(config: Config, *, config_path: str | None, start: bool
     args = [sys.executable, "-m", "posture_watch", "run"]
     if config_path:
         args.extend(["--config", str(Path(config_path).expanduser())])
+    if config.placement_profile != "default":
+        args.extend(["--placement", config.placement_profile])
 
     plist = {
         "Label": LABEL,
@@ -65,4 +67,3 @@ def _launchctl(args: list[str], *, check: bool) -> subprocess.CompletedProcess:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-

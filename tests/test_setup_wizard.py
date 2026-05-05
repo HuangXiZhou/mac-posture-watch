@@ -19,6 +19,7 @@ class SetupWizardTest(unittest.TestCase):
 
             content = output.read_text(encoding="utf-8")
             self.assertIn("ENABLE_LLM_VERIFY=0", content)
+            self.assertIn("PLACEMENT_PROFILE=default", content)
             self.assertIn("LLM_PROVIDER=local", content)
             self.assertIn("FRAME_INTERVAL_SEC=3", content)
             self.assertIn("MAC_NOTIFY=1", content)
@@ -43,4 +44,3 @@ class SetupWizardTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

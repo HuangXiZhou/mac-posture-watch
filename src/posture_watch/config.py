@@ -4,11 +4,32 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .placement import baseline_path_for_placement, normalize_placement_profile
+
 try:
     from dotenv import load_dotenv
 except ImportError:
-    def load_dotenv(*args, **kwargs) -> bool:  # type: ignore[no-redef]
-        return False
+    def load_dotenv(  # type: ignore[no-redef]
+        path=None,
+        *,
+        override: bool = False,
+        **kwargs,
+    ) -> bool:
+        if path is None:
+            return False
+        env_path = Path(path)
+        if not env_path.exists():
+            return False
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if override or key not in os.environ:
+                os.environ[key] = value
+        return True
 
 APP_NAME = "posture-watch"
 
@@ -37,6 +58,7 @@ def _float(value: str | None, default: float) -> float:
 
 @dataclass(frozen=True)
 class Config:
+    placement_profile: str = "default"
     camera_index: int = 0
     frame_interval_sec: float = 2.0
     calibration_sec: int = 45
@@ -46,7 +68,7 @@ class Config:
     local_score_trigger: float = 70.0
     llm_verify_score: float = 75.0
     bad_ratio_required: float = 0.65
-    local_only_notify_score: float = 84.0
+    local_only_notify_score: float = 82.0
 
     enable_llm_verify: bool = False
     llm_provider: str = "openai_compatible"
@@ -93,9 +115,16 @@ def load_config(config_path: str | Path | None = None) -> Config:
             load_dotenv(cwd_env, override=True)
 
     data_dir = Path(os.getenv("DATA_DIR") or default_data_dir()).expanduser()
-    baseline_path = Path(os.getenv("BASELINE_PATH") or data_dir / "baseline.json").expanduser()
+    placement_profile = normalize_placement_profile(os.getenv("PLACEMENT_PROFILE") or "default")
+    baseline_env = os.getenv("BASELINE_PATH")
+    baseline_path = (
+        Path(baseline_env).expanduser()
+        if baseline_env
+        else baseline_path_for_placement(data_dir, placement_profile)
+    )
 
     return Config(
+        placement_profile=placement_profile,
         camera_index=_int(os.getenv("CAMERA_INDEX"), 0),
         frame_interval_sec=_float(os.getenv("FRAME_INTERVAL_SEC"), 2.0),
         calibration_sec=_int(os.getenv("CALIBRATION_SEC"), 45),
@@ -104,7 +133,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
         local_score_trigger=_float(os.getenv("LOCAL_SCORE_TRIGGER"), 70.0),
         llm_verify_score=_float(os.getenv("LLM_VERIFY_SCORE"), 75.0),
         bad_ratio_required=_float(os.getenv("BAD_RATIO_REQUIRED"), 0.65),
-        local_only_notify_score=_float(os.getenv("LOCAL_ONLY_NOTIFY_SCORE"), 84.0),
+        local_only_notify_score=_float(os.getenv("LOCAL_ONLY_NOTIFY_SCORE"), 82.0),
         enable_llm_verify=_bool(os.getenv("ENABLE_LLM_VERIFY"), False),
         llm_provider=os.getenv("LLM_PROVIDER") or "openai_compatible",
         llm_api_mode=(os.getenv("LLM_API_MODE") or "chat").lower(),

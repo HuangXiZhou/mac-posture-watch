@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem without sharing private camera data.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not upload camera captures, API keys, Bark endpoints, logs with secrets, or baseline files.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      description: Minimal commands and setup steps.
+      placeholder: |
+        posture-watch doctor --camera
+        posture-watch adapt
+        posture-watch start
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: posture-watch 0.1.0
+  - type: dropdown
+    id: python
+    attributes:
+      label: Python Version
+      options:
+        - "3.10"
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - "Other"
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Verification Mode
+      options:
+        - Local CV only
+        - Ollama/local vision model
+        - OpenAI-compatible API
+  - type: textarea
+    id: logs
+    attributes:
+      label: Redacted Output
+      description: Paste only redacted command output.
+      render: text

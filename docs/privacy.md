@@ -37,7 +37,8 @@ Before committing, run:
 
 ```bash
 git status --short
+rg -n "sk-[A-Za-z0-9_-]{20,}|BEGIN (RSA|OPENSSH|PRIVATE) KEY|api\\.day\\.app/[A-Za-z0-9_-]{12,}" .
 ```
 
-Do not commit real API keys, Bark keys, camera captures, debug frames, or local calibration files.
-
+Review every match before pushing. Placeholder examples are acceptable; real API keys,
+Bark keys, camera captures, debug frames, and local calibration files are not.

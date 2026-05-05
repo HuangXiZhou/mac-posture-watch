@@ -31,51 +31,41 @@ def score_posture(features: Features, baseline: Baseline) -> ScoreBreakdown:
     if features.view_type == "bad":
         return ScoreBreakdown(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, ("bad_view",))
 
-    pitch_delta = abs(features.pitch_deg - baseline.value("pitch_deg"))
-    head_drop_delta = features.face_center_y - baseline.value("face_center_y")
-    nose_drop_delta = features.nose_shoulder_dy - baseline.value("nose_shoulder_dy")
-
-    pitch_score = max(
-        ramp(pitch_delta, 6.0, 22.0),
-        ramp(head_drop_delta, 0.025, 0.12) * 0.75,
-        ramp(nose_drop_delta, 0.025, 0.12) * 0.65,
-    )
-
-    face_distance = _ratio_increase(features.face_size, baseline.value("face_size"), 0.08, 0.38)
-
-    ear_forward_delta = abs(features.ear_shoulder_dx - baseline.value("ear_shoulder_dx"))
-    shoulder_center_drop = features.shoulder_center_y - baseline.value("shoulder_center_y")
-    forward_head = max(
-        ramp(ear_forward_delta, 0.025, 0.10),
-        face_distance * 0.70,
-        ramp(shoulder_center_drop, 0.02, 0.10) * 0.35,
-    )
-
-    shoulder_rounding = max(
-        _ratio_decrease(features.shoulder_width, baseline.value("shoulder_width"), 0.05, 0.22),
-        ramp(abs(features.shoulder_slope - baseline.value("shoulder_slope")), 0.025, 0.09),
-    )
-
+    pitch_score = _head_pitch_score(features, baseline)
+    face_distance = _face_distance_score(features, baseline)
+    forward_head = _forward_head_score(features, baseline, face_distance)
+    shoulder_rounding = _shoulder_rounding_score(features, baseline)
     stillness = clamp(features.stillness * 100.0)
 
     if features.view_type == "face_only":
-        total = 0.48 * pitch_score + 0.42 * face_distance + 0.10 * stillness
-        total = min(total, 68.0)
+        weighted = 0.56 * pitch_score + 0.34 * face_distance + 0.10 * stillness
+        total = _evidence_supported_total(weighted, (pitch_score, face_distance), stillness)
+        total = min(total, 76.0)
     elif features.view_type == "front":
-        total = (
+        weighted = (
             0.38 * pitch_score
             + 0.18 * forward_head
             + 0.24 * face_distance
             + 0.10 * shoulder_rounding
             + 0.10 * stillness
         )
+        total = _evidence_supported_total(
+            weighted,
+            (pitch_score, forward_head, face_distance, shoulder_rounding),
+            stillness,
+        )
     else:
-        total = (
+        weighted = (
             0.30 * pitch_score
             + 0.32 * forward_head
             + 0.18 * face_distance
             + 0.10 * shoulder_rounding
             + 0.10 * stillness
+        )
+        total = _evidence_supported_total(
+            weighted,
+            (pitch_score, forward_head, face_distance, shoulder_rounding),
+            stillness,
         )
 
     reasons: list[str] = []
@@ -100,3 +90,46 @@ def score_posture(features: Features, baseline: Baseline) -> ScoreBreakdown:
         reasons=tuple(reasons),
     )
 
+
+def _head_pitch_score(features: Features, baseline: Baseline) -> float:
+    pitch_delta = abs(features.pitch_deg - baseline.value("pitch_deg"))
+    head_drop_delta = features.face_center_y - baseline.value("face_center_y")
+    nose_drop_delta = features.nose_shoulder_dy - baseline.value("nose_shoulder_dy")
+    return max(
+        ramp(pitch_delta, 6.0, 22.0),
+        ramp(head_drop_delta, 0.025, 0.12) * 0.75,
+        ramp(nose_drop_delta, 0.025, 0.12) * 0.65,
+    )
+
+
+def _face_distance_score(features: Features, baseline: Baseline) -> float:
+    return _ratio_increase(features.face_size, baseline.value("face_size"), 0.08, 0.38)
+
+
+def _forward_head_score(features: Features, baseline: Baseline, face_distance: float) -> float:
+    ear_forward_delta = abs(features.ear_shoulder_dx - baseline.value("ear_shoulder_dx"))
+    shoulder_center_drop = features.shoulder_center_y - baseline.value("shoulder_center_y")
+    return max(
+        ramp(ear_forward_delta, 0.025, 0.10),
+        face_distance * 0.70,
+        ramp(shoulder_center_drop, 0.02, 0.10) * 0.35,
+    )
+
+
+def _shoulder_rounding_score(features: Features, baseline: Baseline) -> float:
+    return max(
+        _ratio_decrease(features.shoulder_width, baseline.value("shoulder_width"), 0.05, 0.22),
+        ramp(abs(features.shoulder_slope - baseline.value("shoulder_slope")), 0.025, 0.09),
+    )
+
+
+def _evidence_supported_total(
+    weighted: float,
+    components: tuple[float, ...],
+    stillness: float,
+) -> float:
+    strongest = sorted(components, reverse=True)[:2]
+    top = strongest[0] if strongest else 0.0
+    second = strongest[1] if len(strongest) > 1 else 0.0
+    supported = 0.72 * top + 0.18 * second + 0.10 * stillness
+    return max(weighted, supported)

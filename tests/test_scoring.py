@@ -59,7 +59,8 @@ class ScorePostureTest(unittest.TestCase):
             stillness=1.0,
         )
         score = score_posture(features, baseline())
-        self.assertLessEqual(score.total, 68)
+        self.assertGreaterEqual(score.total, 70)
+        self.assertLessEqual(score.total, 76)
         self.assertIn("face_only_cap", score.reasons)
 
     def test_bad_view_scores_zero(self) -> None:
@@ -69,4 +70,3 @@ class ScorePostureTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

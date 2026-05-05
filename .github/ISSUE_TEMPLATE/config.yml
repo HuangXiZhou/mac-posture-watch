@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security policy
+    url: https://github.com/HuangXiZhou/mac-posture-watch/security/policy
+    about: Report security and privacy concerns without posting sensitive payloads.
