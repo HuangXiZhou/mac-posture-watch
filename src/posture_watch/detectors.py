@@ -124,7 +124,14 @@ def _landmark(lm) -> Landmark:
     return Landmark(
         x=float(lm.x),
         y=float(lm.y),
-        z=float(getattr(lm, "z", 0.0)),
-        visibility=float(getattr(lm, "visibility", 1.0)),
-        presence=float(getattr(lm, "presence", 1.0)),
+        z=_float_attr(lm, "z", 0.0),
+        visibility=_float_attr(lm, "visibility", 1.0),
+        presence=_float_attr(lm, "presence", 1.0),
     )
+
+
+def _float_attr(obj, name: str, default: float) -> float:
+    value = getattr(obj, name, default)
+    if value is None:
+        return default
+    return float(value)
